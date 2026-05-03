@@ -29,20 +29,20 @@
  *   Window for estimating flick speed from recent pointer moves (longer → smoother estimate, more lag).
  */
 
-/** Fast flick: advance prev/next even with small drag. Typical TikTok: ~400–900 px/s. */
-export const FLICK_VELOCITY_THRESHOLD_PX_PER_S = 520;
+/** Fast flick: advance prev/next even with small drag. Lower = easier one-swipe advance on real devices. */
+export const FLICK_VELOCITY_THRESHOLD_PX_PER_S = 380;
 
 /** Slow drag: need at least this fraction of slide height past the start snap to change slide. */
-export const DISTANCE_THRESHOLD_RATIO = 0.22;
+export const DISTANCE_THRESHOLD_RATIO = 0.14;
 
 /** Overscroll past first/last slide: raw overflow is multiplied by this (0.22 ≈ noticeable resistance). */
 export const EDGE_RUBBERBAND_FACTOR = 0.28;
 
-/** Spring toward snap target (not CSS ease). Higher = faster initial correction. */
-export const SPRING_STIFFNESS = 420;
+/** Spring toward snap target (not CSS ease). Higher = faster initial correction (less “draggy”). */
+export const SPRING_STIFFNESS = 560;
 
-/** Opposes velocity; reduces oscillation. Raise if the feed “bounces” past the slide. */
-export const SPRING_DAMPING = 38;
+/** Opposes velocity; reduces oscillation. Slightly lower than before so settle doesn’t feel heavy. */
+export const SPRING_DAMPING = 30;
 
 /** Inertia of the motion model (not screen DPI). 1 is a good default. */
 export const SPRING_MASS = 1;
@@ -53,8 +53,11 @@ export const SPRING_SNAP_EPSILON_PX = 0.65;
 /** Stop spring when speed is below this (px/s). */
 export const SPRING_SNAP_EPSILON_VEL_PX_PER_S = 8;
 
-/** Max time window (ms) of pointer samples used for flick velocity. */
-export const VELOCITY_SAMPLE_MS = 110;
+/** Max time window (ms) of pointer samples kept for velocity (end-weighted in code). */
+export const VELOCITY_SAMPLE_MS = 100;
+
+/** Last N ms of the gesture weighted more for flick detection (captures release speed, not whole drag). */
+export const VELOCITY_END_WINDOW_MS = 48;
 
 /**
  * Blends measured release velocity into the spring (0 = ignore finger inertia, 1 = full).
@@ -75,7 +78,7 @@ export const RELEASE_VELOCITY_SPRING_BLEND = 0.85;
  *
  * “Rubber band at first/last slide too loose” → lower EDGE_RUBBERBAND_FACTOR.
  *
- * “Velocity feels laggy or noisy” → tweak VELOCITY_SAMPLE_MS (shorter = faster reaction, noisier).
+ * “Velocity feels laggy or noisy” → tweak VELOCITY_END_WINDOW_MS / VELOCITY_SAMPLE_MS.
  *
  * Implementation: `components/VerticalSpringFeed.tsx` (pointer + spring loop), constants in this file only.
  */

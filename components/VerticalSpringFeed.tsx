@@ -53,15 +53,27 @@ function pushSample(samplesRef: React.MutableRefObject<Sample[]>, t: number, y: 
   while (arr.length > 1 && arr[0].t < cutoff) arr.shift();
 }
 
+/**
+ * End-of-gesture velocity: averaging the whole finger path dilutes quick flicks (feels like you must swipe twice).
+ * Blend last movement (pair) with a short end window so release speed wins.
+ */
 function estimateVelocityPxPerSec(samplesRef: React.MutableRefObject<Sample[]>): number {
   const arr = samplesRef.current;
   if (arr.length < 2) return 0;
-  const first = arr[0];
   const last = arr[arr.length - 1];
-  const dt = (last.t - first.t) / 1000;
-  if (dt < 1e-3) return 0;
+  const prev = arr[arr.length - 2];
+  const dtPair = (last.t - prev.t) / 1000;
+  const vPair = dtPair > 1e-4 ? (last.y - prev.y) / dtPair : 0;
+
+  const cutoff = last.t - Tune.VELOCITY_END_WINDOW_MS;
+  let i = arr.length - 1;
+  while (i > 0 && arr[i - 1].t >= cutoff) i--;
+  const winStart = arr[i];
+  const dtWin = (last.t - winStart.t) / 1000;
+  const vWin = dtWin > 1e-4 ? (last.y - winStart.y) / dtWin : vPair;
+
   // Positive = finger moving down (screen Y increases).
-  return (last.y - first.y) / dt;
+  return vPair * 0.72 + vWin * 0.28;
 }
 
 export type VerticalSpringFeedProps = {
@@ -238,7 +250,16 @@ export default function VerticalSpringFeed({
       if (h <= 0) return;
 
       draggingRef.current = true;
-      gestureStartIndexRef.current = activeIndexRef.current;
+
+      const maxIndex = Math.max(0, slideCount - 1);
+      // Nearest slide from actual pixel offset (fixes “two swipes” after interrupting a spring or tiny drift).
+      const nearest = clamp(Math.round(-translateRef.current / h), 0, maxIndex);
+      if (nearest !== activeIndexRef.current) {
+        activeIndexRef.current = nearest;
+        onActiveIndexChange(nearest);
+      }
+
+      gestureStartIndexRef.current = nearest;
       gestureStartTranslateRef.current = translateRef.current;
       pointerStartYRef.current = e.clientY;
       samplesRef.current = [{ t: performance.now(), y: e.clientY }];
@@ -249,7 +270,7 @@ export default function VerticalSpringFeed({
         /* ignore */
       }
     },
-    [measure, stopSpring]
+    [measure, onActiveIndexChange, slideCount, stopSpring]
   );
 
   const onPointerMove = useCallback(
@@ -368,7 +389,7 @@ export default function VerticalSpringFeed({
     const onWheel = (e: WheelEvent) => {
       if (draggingRef.current || animatingRef.current) return;
       const dy = e.deltaY;
-      if (Math.abs(dy) < 32) return;
+      if (Math.abs(dy) < 18) return;
       e.preventDefault();
 
       const maxIndex = Math.max(0, slideCount - 1);

@@ -1,23 +1,16 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import { Swiper, SwiperSlide, SwiperClass } from "swiper/react";
-import { Mousewheel, Keyboard } from "swiper/modules";
 import ComicSlide from "@/components/comic-slide";
+import VerticalSpringFeed from "@/components/VerticalSpringFeed";
 import { mockComics } from "@/lib/mock-data";
 import AnimatedInfoButton from "@/components/AnimatedInfoButton";
 import { AnimatePresence, motion } from "framer-motion";
 
-interface SwiperRef {
-  swiper: SwiperClass;
-}
-
 export default function Home() {
-  const swiperRef = useRef<SwiperRef | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [isInfoButtonVisible, setIsInfoButtonVisible] = useState(false);
   const slideRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Observe slide visibility
   useEffect(() => {
@@ -49,7 +42,7 @@ export default function Home() {
     return () => observer.disconnect();
   }, [activeIndex]);
 
-    const handleSlideChangeTransitionStart = useCallback(() => {
+  const handleSlideChangeTransitionStart = useCallback(() => {
     setIsInfoButtonVisible(false);
   }, []);
 
@@ -63,35 +56,27 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="w-full h-screen overflow-hidden">
-      <Swiper
-        ref={swiperRef}
-        direction="vertical"
-        slidesPerView={1}
-        mousewheel
-        keyboard
-        modules={[Mousewheel, Keyboard]}
-        onSlideChange={(swiper) => setActiveIndex(swiper.activeIndex)}
-        onSlideNextTransitionStart={handleSlideChangeTransitionStart}
-        onSlideNextTransitionEnd={handleSlideChangeTransitionEnd}
-        onSetTranslate={(tr)=>console.log("translateeee",tr)}
-        className="w-full h-full"
+    <main className="w-full h-dvh overflow-hidden">
+      <VerticalSpringFeed
+        className="h-full w-full"
+        activeIndex={activeIndex}
+        onActiveIndexChange={setActiveIndex}
+        onSlideChangeTransitionStart={handleSlideChangeTransitionStart}
+        onSlideChangeTransitionEnd={handleSlideChangeTransitionEnd}
       >
         {mockComics.map((comic, index) => (
-          <SwiperSlide key={comic.id}>
-            <div
-              ref={(el) => { slideRefs.current[index] = el; }}
-              data-index={index}
-              className="h-full w-full"
-            >
-              <ComicSlide
-                comic={comic}
-                isActive={index === activeIndex}
-              />
-            </div>
-          </SwiperSlide>
+          <div
+            key={comic.id}
+            ref={(el) => {
+              slideRefs.current[index] = el;
+            }}
+            data-index={index}
+            className="h-dvh w-full shrink-0"
+          >
+            <ComicSlide comic={comic} isActive={index === activeIndex} />
+          </div>
         ))}
-      </Swiper>
+      </VerticalSpringFeed>
 
       <AnimatePresence>
         {isInfoButtonVisible && (

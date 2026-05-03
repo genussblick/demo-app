@@ -8,19 +8,26 @@ import circleAnim from "@/public/animation_02_920x920.json";
 import plusAnim from "@/public/animation_03_920x920.json";
 import { BsFillPlusCircleFill } from "react-icons/bs";
 
+/** Defer `controls.start()` until after the target `motion` node has mounted (Framer requirement). */
+function startWhenMounted(start: () => void) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(start);
+  });
+}
+
 export default function AnimatedInfoButton() {
   const [phase, setPhase] = useState<"circle" | "plus" | "pill">("circle");
 
   const container = useAnimation();
-  const textAnim = useAnimation();
 
   useEffect(() => {
-    // Start small circle immediately
-    container.start({
-      width: 44,
-      height: 44,
-      borderRadius: "100%",
-      transition: { duration: 0.4, ease: "easeOut" },
+    startWhenMounted(() => {
+      void container.start({
+        width: 44,
+        height: 44,
+        borderRadius: "100%",
+        transition: { duration: 0.4, ease: "easeOut" },
+      });
     });
   }, [container]);
 
@@ -49,17 +56,14 @@ export default function AnimatedInfoButton() {
               loop={false}
               className="absolute w-14 h-14"
               onComplete={() => {
-                setTimeout(async () => {
+                setTimeout(() => {
                   setPhase("pill");
-                  // Expand pill to the left
-                  await container.start({
+                  void container.start({
                     width: 85,
                     height: 44,
                     borderRadius: "9999px",
                     transition: { duration: 0.45, ease: "easeOut" },
                   });
-                  // Fade text in
-                  textAnim.start({ opacity: 1, x: 0 });
                 }, 0);
               }}
             />
@@ -74,9 +78,9 @@ export default function AnimatedInfoButton() {
         {/* ✅ Info text slides in when pill expands */}
         {phase === "pill" && (
           <motion.span
-            animate={textAnim}
             initial={{ opacity: 0, x: 10 }}
-            transition={{ duration: 0.1, ease: "easeOut" }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut", delay: 0.2 }}
             className="text-sm font-medium text-black pr-8 whitespace-nowrap"
           >
             Info

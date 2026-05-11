@@ -16,7 +16,7 @@ export const FLICK_VELOCITY_THRESHOLD_PX_PER_S = 220;
  * Slow drag: TikTok requires ~20% of slide height to commit without a flick.
  * Slightly higher than before to prevent accidental swipes from natural scrolling.
  */
-export const DISTANCE_THRESHOLD_RATIO = 0.20;
+export const DISTANCE_THRESHOLD_RATIO = 0.4;
 
 /**
  * Overscroll at edges: TikTok is very stiff — barely gives at the first/last slide.

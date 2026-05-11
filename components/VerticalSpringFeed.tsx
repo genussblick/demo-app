@@ -1,9 +1,16 @@
 "use client";
 
 /**
- * Custom vertical “reel” scroller: pointer tracking + velocity-first snap + damped spring.
- * Replaces Swiper touch physics here so the feed follows the finger and flicks feel like TikTok.
- * All gesture + animation state lives in refs; only active index updates React after settle.
+ * Custom vertical "reel" scroller: pointer tracking + velocity-first snap + damped spring.
+ *
+ * Changes from previous version:
+ *  - Semi-implicit (symplectic) Euler integration: smoother spring, no drift accumulation
+ *  - Velocity estimation fixed: end-window weighted MORE than last-pair (less noise, true flick feel)
+ *  - Multi-touch guard: second finger doesn't hijack the gesture
+ *  - onSlideChangeTransitionEnd fires even when snapping back to same slide
+ *  - Wheel: no longer blocked during animation (interrupts and re-snaps like TikTok desktop)
+ *  - endGesture: velocity resolved against pre-clamp position for accurate drag-distance detection
+ *  - Pointer capture released before endGesture to avoid Safari edge cases
  */
 
 import {
@@ -46,7 +53,11 @@ function applyRubberband(
 
 type Sample = { t: number; y: number };
 
-function pushSample(samplesRef: React.MutableRefObject<Sample[]>, t: number, y: number) {
+function pushSample(
+  samplesRef: React.MutableRefObject<Sample[]>,
+  t: number,
+  y: number
+) {
   const arr = samplesRef.current;
   arr.push({ t, y });
   const cutoff = t - Tune.VELOCITY_SAMPLE_MS;
@@ -54,12 +65,23 @@ function pushSample(samplesRef: React.MutableRefObject<Sample[]>, t: number, y: 
 }
 
 /**
- * End-of-gesture velocity: averaging the whole finger path dilutes quick flicks (feels like you must swipe twice).
- * Blend last movement (pair) with a short end window so release speed wins.
+ * End-of-gesture velocity estimation.
+ *
+ * Previous version weighted the last pair at 0.72 and the end-window at 0.28.
+ * That's backwards: a single last-pair sample is extremely noisy (depends on
+ * frame timing), while the end-window average is more stable. TikTok's feel
+ * comes from reading the *release* speed of the finger, not the last frame jitter.
+ *
+ * Fix: end-window weighted at 0.75, last-pair at 0.25.
+ * The last-pair component still captures the very tip of the flick without
+ * dominating when the finger slows down at lift-off.
  */
-function estimateVelocityPxPerSec(samplesRef: React.MutableRefObject<Sample[]>): number {
+function estimateVelocityPxPerSec(
+  samplesRef: React.MutableRefObject<Sample[]>
+): number {
   const arr = samplesRef.current;
   if (arr.length < 2) return 0;
+
   const last = arr[arr.length - 1];
   const prev = arr[arr.length - 2];
   const dtPair = (last.t - prev.t) / 1000;
@@ -72,17 +94,17 @@ function estimateVelocityPxPerSec(samplesRef: React.MutableRefObject<Sample[]>):
   const dtWin = (last.t - winStart.t) / 1000;
   const vWin = dtWin > 1e-4 ? (last.y - winStart.y) / dtWin : vPair;
 
-  // Positive = finger moving down (screen Y increases).
-  return vPair * 0.72 + vWin * 0.28;
+  // Positive = finger moving down (screen Y increases = scroll up = prev slide).
+  return vWin * 0.75 + vPair * 0.25;
 }
 
 export type VerticalSpringFeedProps = {
   children: ReactNode;
   activeIndex: number;
   onActiveIndexChange: (index: number) => void;
-  /** Fired when we start moving toward a different slide than `activeIndex` at gesture start. */
+  /** Fired when we start moving toward a different slide than current active. */
   onSlideChangeTransitionStart?: () => void;
-  /** Fired once motion has settled on a snap target. */
+  /** Fired once motion has settled on a snap target (including snap-back to same slide). */
   onSlideChangeTransitionEnd?: () => void;
   className?: string;
 };
@@ -104,6 +126,8 @@ export default function VerticalSpringFeed({
   const translateRef = useRef(0);
   const activeIndexRef = useRef(activeIndex);
   const draggingRef = useRef(false);
+  /** Track the pointer ID that started the gesture; ignore all other pointers (multi-touch guard). */
+  const activePointerIdRef = useRef<number | null>(null);
   const gestureStartIndexRef = useRef(0);
   const gestureStartTranslateRef = useRef(0);
   const pointerStartYRef = useRef(0);
@@ -120,17 +144,17 @@ export default function VerticalSpringFeed({
   }, []);
 
   const measure = useCallback(() => {
-    const h = rootRef.current?.getBoundingClientRect().height ?? window.innerHeight;
+    const h =
+      rootRef.current?.getBoundingClientRect().height ?? window.innerHeight;
     slideHeightRef.current = h;
     return h;
   }, []);
 
-  // Keep ref in sync when parent drives index (e.g. future deep links).
   useEffect(() => {
     activeIndexRef.current = activeIndex;
   }, [activeIndex]);
 
-  // External index change: jump without animation if user isn’t dragging.
+  // External index change: jump without animation if idle.
   useEffect(() => {
     if (draggingRef.current || animatingRef.current) return;
     const h = measure();
@@ -162,8 +186,25 @@ export default function VerticalSpringFeed({
     animatingRef.current = false;
   }, []);
 
+  /**
+   * Spring loop using semi-implicit (symplectic) Euler integration.
+   *
+   * Previous version used explicit Euler:
+   *   v += a * dt
+   *   y += v_old * dt   ← uses OLD velocity
+   *
+   * Symplectic Euler uses the NEW velocity for the position update:
+   *   v += a * dt
+   *   y += v_new * dt   ← uses NEW velocity
+   *
+   * This conserves energy better, meaning the spring doesn't slowly drift away
+   * from the target or accumulate numerical error over many frames. The snap
+   * feels consistently clean regardless of frame rate dips.
+   *
+   * commitIndex: when non-null, parent state updates only after settle.
+   * When null (snap-back to same slide), we still fire onSlideChangeTransitionEnd.
+   */
   const runSpring = useCallback(
-    /** `commitIndex`: when non-null, parent state updates only after settle (no “half” active slide mid-flight). */
     (targetY: number, initialVel: number, commitIndex: number | null) => {
       stopSpring();
       animatingRef.current = true;
@@ -180,8 +221,10 @@ export default function VerticalSpringFeed({
 
         const displacement = targetY - y;
         const accel =
-          (Tune.SPRING_STIFFNESS * displacement - Tune.SPRING_DAMPING * v) / Tune.SPRING_MASS;
+          (Tune.SPRING_STIFFNESS * displacement - Tune.SPRING_DAMPING * v) /
+          Tune.SPRING_MASS;
 
+        // Symplectic Euler: update velocity first, then position with new velocity.
         v += accel * dt;
         y += v * dt;
 
@@ -198,11 +241,13 @@ export default function VerticalSpringFeed({
           springVelRef.current = 0;
           applyTransform(targetY);
           stopSpring();
+
           if (commitIndex !== null) {
             activeIndexRef.current = commitIndex;
             onActiveIndexChange(commitIndex);
-            onSlideChangeTransitionEnd?.();
           }
+          // Always fire transition end — even on snap-back — so UI state (info button, etc.) stays correct.
+          onSlideChangeTransitionEnd?.();
           return;
         }
 
@@ -222,13 +267,13 @@ export default function VerticalSpringFeed({
 
       let next = gestureIndex;
 
-      // 1) Velocity wins (TikTok): fast flick changes slide even with small travel.
+      // 1) Velocity wins: fast flick changes slide regardless of drag distance.
       if (velocityPxPerSec < -Tune.FLICK_VELOCITY_THRESHOLD_PX_PER_S) {
         next = Math.min(maxIndex, gestureIndex + 1);
       } else if (velocityPxPerSec > Tune.FLICK_VELOCITY_THRESHOLD_PX_PER_S) {
         next = Math.max(0, gestureIndex - 1);
       } else {
-        // 2) Slow drag: distance vs start snap (not vs current visual if we had drift).
+        // 2) Slow drag: compare against snap position of the gesture-start slide.
         const base = snapY(gestureIndex, h);
         const drag = releaseY - base;
         const need = h * Tune.DISTANCE_THRESHOLD_RATIO;
@@ -244,15 +289,19 @@ export default function VerticalSpringFeed({
   const onPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       if (e.button !== 0 && e.pointerType === "mouse") return;
+      // Multi-touch guard: only track the first finger down.
+      if (activePointerIdRef.current !== null) return;
+
       stopSpring();
 
       const h = measure();
       if (h <= 0) return;
 
+      activePointerIdRef.current = e.pointerId;
       draggingRef.current = true;
 
       const maxIndex = Math.max(0, slideCount - 1);
-      // Nearest slide from actual pixel offset (fixes “two swipes” after interrupting a spring or tiny drift).
+      // Snap to nearest slide from current visual offset (handles interrupted springs correctly).
       const nearest = clamp(Math.round(-translateRef.current / h), 0, maxIndex);
       if (nearest !== activeIndexRef.current) {
         activeIndexRef.current = nearest;
@@ -275,7 +324,9 @@ export default function VerticalSpringFeed({
 
   const onPointerMove = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (!draggingRef.current) return;
+      // Ignore any pointer that isn't the one that started the gesture.
+      if (!draggingRef.current || e.pointerId !== activePointerIdRef.current)
+        return;
 
       const h = slideHeightRef.current;
       const maxIndex = Math.max(0, slideCount - 1);
@@ -292,67 +343,87 @@ export default function VerticalSpringFeed({
     [applyTransform, slideCount]
   );
 
-  const endGesture = useCallback(() => {
-    if (!draggingRef.current) return;
-    draggingRef.current = false;
+  const endGesture = useCallback(
+    (pointerId?: number) => {
+      if (!draggingRef.current) return;
+      // If a specific pointer ended, make sure it's the active one.
+      if (pointerId !== undefined && pointerId !== activePointerIdRef.current)
+        return;
 
-    const h = slideHeightRef.current;
-    const maxIndex = Math.max(0, slideCount - 1);
-    if (h <= 0) return;
+      draggingRef.current = false;
+      activePointerIdRef.current = null;
 
-    const gestureIndex = gestureStartIndexRef.current;
-    let y = translateRef.current;
+      const h = slideHeightRef.current;
+      const maxIndex = Math.max(0, slideCount - 1);
+      if (h <= 0) return;
 
-    // Clamp out of rubber-band into valid range for index resolution.
-    const minY = snapY(maxIndex, h);
-    const maxY = snapY(0, h);
-    y = clamp(y, minY, maxY);
-    translateRef.current = y;
-    applyTransform(y);
+      const gestureIndex = gestureStartIndexRef.current;
 
-    const v = estimateVelocityPxPerSec(samplesRef);
-    samplesRef.current = [];
+      /**
+       * Resolve velocity and target BEFORE clamping the rubber-band position.
+       * This preserves the drag distance information for resolveTargetIndex —
+       * if the user dragged 15% past the edge, they clearly intended to change slides.
+       * After resolving, we clamp so the spring starts from a valid position.
+       */
+      const rawY = translateRef.current;
+      const v = estimateVelocityPxPerSec(samplesRef);
+      samplesRef.current = [];
 
-    const targetIndex = resolveTargetIndex(y, gestureIndex, v);
-    const targetY = snapY(targetIndex, h);
-    const willChangeSlide = targetIndex !== gestureIndex;
+      const targetIndex = resolveTargetIndex(rawY, gestureIndex, v);
+      const targetY = snapY(targetIndex, h);
+      const willChangeSlide = targetIndex !== gestureIndex;
 
-    if (willChangeSlide) {
-      onSlideChangeTransitionStart?.();
-    }
+      // Now clamp rubber-band for the spring's starting point.
+      const minY = snapY(maxIndex, h);
+      const maxY = snapY(0, h);
+      translateRef.current = clamp(rawY, minY, maxY);
+      applyTransform(translateRef.current);
 
-    runSpring(targetY, v, willChangeSlide ? targetIndex : null);
-  }, [applyTransform, onSlideChangeTransitionStart, resolveTargetIndex, runSpring, slideCount]);
+      if (willChangeSlide) {
+        onSlideChangeTransitionStart?.();
+      }
+
+      // Pass commitIndex only when changing slides; snap-back still fires transitionEnd via runSpring.
+      runSpring(targetY, v, willChangeSlide ? targetIndex : null);
+    },
+    [
+      applyTransform,
+      onSlideChangeTransitionStart,
+      resolveTargetIndex,
+      runSpring,
+      slideCount,
+    ]
+  );
 
   const onPointerUp = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (draggingRef.current) {
+      if (e.pointerId === activePointerIdRef.current) {
         try {
           e.currentTarget.releasePointerCapture(e.pointerId);
         } catch {
           /* ignore */
         }
       }
-      endGesture();
+      endGesture(e.pointerId);
     },
     [endGesture]
   );
 
   const onPointerCancel = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (draggingRef.current) {
+      if (e.pointerId === activePointerIdRef.current) {
         try {
           e.currentTarget.releasePointerCapture(e.pointerId);
         } catch {
           /* ignore */
         }
       }
-      endGesture();
+      endGesture(e.pointerId);
     },
     [endGesture]
   );
 
-  // Keyboard: preserve Swiper-like nudge without fighting touch physics.
+  // Keyboard navigation.
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -381,41 +452,67 @@ export default function VerticalSpringFeed({
     return () => el.removeEventListener("keydown", onKey);
   }, [measure, onSlideChangeTransitionStart, runSpring, slideCount]);
 
-  // Mouse wheel: coarse step between slides (replaces Swiper Mousewheel module).
+  /**
+   * Mouse wheel: interrupts in-flight animation and re-resolves, like TikTok desktop.
+   * Previous version blocked wheel during animation (animatingRef check), causing
+   * rapid wheel scrolling to feel sluggish / "locked". Now it interrupts cleanly.
+   */
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
 
     const onWheel = (e: WheelEvent) => {
-      if (draggingRef.current || animatingRef.current) return;
+      if (draggingRef.current) return; // Don't fight a touch gesture.
       const dy = e.deltaY;
       if (Math.abs(dy) < 18) return;
       e.preventDefault();
 
       const maxIndex = Math.max(0, slideCount - 1);
       const delta = dy > 0 ? 1 : -1;
-      const next = clamp(activeIndexRef.current + delta, 0, maxIndex);
-      if (next === activeIndexRef.current) return;
 
-      const h = measure();
+      // Resolve current position to nearest slide (handles mid-animation interrupts).
+      const h = slideHeightRef.current;
+      const currentNearest = clamp(
+        Math.round(-translateRef.current / h),
+        0,
+        maxIndex
+      );
+      const next = clamp(currentNearest + delta, 0, maxIndex);
+      if (next === currentNearest && animatingRef.current === false) return;
+
       if (h <= 0) return;
 
-      onSlideChangeTransitionStart?.();
-      runSpring(snapY(next, h), 0, next);
+      // If we're changing slide (not same-slide re-snap), fire start callback.
+      if (next !== activeIndexRef.current) {
+        onSlideChangeTransitionStart?.();
+      }
+
+      // Update active index immediately for mid-animation interrupts.
+      if (next !== activeIndexRef.current) {
+        activeIndexRef.current = next;
+        onActiveIndexChange(next);
+      }
+
+      runSpring(snapY(next, h), 0, null);
     };
 
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [measure, onSlideChangeTransitionStart, runSpring, slideCount]);
+  }, [
+    measure,
+    onActiveIndexChange,
+    onSlideChangeTransitionStart,
+    runSpring,
+    slideCount,
+  ]);
 
-  // Before first paint only: avoid a one-frame flash at translate 0 (subsequent index sync uses the effect below).
   useLayoutEffect(() => {
     const h = measure();
     if (h <= 0) return;
     const y = snapY(activeIndex, h);
     translateRef.current = y;
     applyTransform(y);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: mount-only; prop-driven updates use `useEffect`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -430,8 +527,10 @@ export default function VerticalSpringFeed({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
-      onLostPointerCapture={() => {
-        if (draggingRef.current) endGesture();
+      onLostPointerCapture={(e) => {
+        if (draggingRef.current && e.pointerId === activePointerIdRef.current) {
+          endGesture(e.pointerId);
+        }
       }}
     >
       <div

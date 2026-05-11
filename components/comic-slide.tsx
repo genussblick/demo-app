@@ -39,18 +39,17 @@ export default function ComicSlide({ comic, isActive }: ComicSlideProps) {
           sizes="(max-width: 768px) 100vw, (max-width: 1200px) 100vw, 100vw"
         />
 
-        {showHearts && (
+        {/* {showHearts && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <LottieAnimation type="hearts" />
           </div>
-        )}
+        )} */}
       </div>
 
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent p-6 text-white">
+      {/* <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent p-6 text-white">
         <h2 className="text-2xl font-bold text-balance mb-2">{comic.title}</h2>
         <p className="text-sm text-gray-300 mb-4 text-balance">{comic.author}</p>
 
-        {/* Action buttons */}
         <div className="flex items-center gap-6">
           <button onClick={handleLikeClick} className="flex flex-col items-center gap-1 group">
             <div
@@ -77,7 +76,7 @@ export default function ComicSlide({ comic, isActive }: ComicSlideProps) {
             <span className="text-xs text-gray-300">Share</span>
           </button>
         </div>
-      </div>
+      </div> */}
     </div>
   )
 }

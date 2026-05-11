@@ -78,7 +78,7 @@ export default function Home() {
         ))}
       </VerticalSpringFeed>
 
-      <AnimatePresence>
+      {/* <AnimatePresence>
         {isInfoButtonVisible && (
           <motion.div
             key="animated-info-button"
@@ -91,7 +91,7 @@ export default function Home() {
             <AnimatedInfoButton />
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence> */}
     </main>
   );
 }

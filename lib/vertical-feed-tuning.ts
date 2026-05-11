@@ -53,5 +53,5 @@ export const VELOCITY_SAMPLE_MS = 80;
 /** Only the last N ms matter for flick detection — captures true release speed. */
 export const VELOCITY_END_WINDOW_MS = 40;
 
-/** How much finger speed carries into the settle animation. */
+/** How much finger speed carries into the setle animation. */
 export const RELEASE_VELOCITY_SPRING_BLEND = 0.85;

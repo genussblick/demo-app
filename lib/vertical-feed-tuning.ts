@@ -54,4 +54,4 @@ export const VELOCITY_SAMPLE_MS = 80;
 export const VELOCITY_END_WINDOW_MS = 40;
 
 /** How much finger speed carries into the settle animation. */
-export const RELEASE_VELOCITY_SPRING_BLEND = 0.55;
+export const RELEASE_VELOCITY_SPRING_BLEND = 0.85;

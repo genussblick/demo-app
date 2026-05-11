@@ -28,7 +28,7 @@ export const EDGE_RUBBERBAND_FACTOR = 0.10;
  * Spring stiffness: Higher = snappier. TikTok's snap is very fast (~120–150ms settle).
  * 900 achieves that without needing extreme damping.
  */
-export const SPRING_STIFFNESS = 900;
+export const SPRING_STIFFNESS = 2200;
 
 /**
  * Damping: Critical damping = 2*sqrt(M*K) = 2*sqrt(1*900) = 60.

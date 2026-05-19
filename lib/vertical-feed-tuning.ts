@@ -58,17 +58,17 @@
 
 
 // Dramatically stiffer spring — settles in ~115ms instead of ~230ms
-export const SPRING_STIFFNESS = 9000;
+export const SPRING_STIFFNESS = 18000;
 
 // Critical damping for stiffness 9000, mass 1 = 2*sqrt(9000) ≈ 190
 // Go slightly overdamped to avoid any bounce
-export const SPRING_DAMPING = 200;
+export const SPRING_DAMPING = 280;
 
 export const SPRING_MASS = 1;
 
 // Tighter epsilon — stop sooner, don't linger
-export const SPRING_SNAP_EPSILON_PX = 0.1;
-export const SPRING_SNAP_EPSILON_VEL_PX_PER_S = 50;
+export const SPRING_SNAP_EPSILON_PX = 0.5;
+export const SPRING_SNAP_EPSILON_VEL_PX_PER_S = 80;
 
 // TikTok flicks respond to very light swipes
 export const FLICK_VELOCITY_THRESHOLD_PX_PER_S = 200;

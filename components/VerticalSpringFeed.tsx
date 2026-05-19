@@ -133,6 +133,7 @@ export default function VerticalSpringFeed({
   const pointerStartYRef = useRef(0);
   const animatingRef = useRef(false);
   const rafRef = useRef<number | null>(null);
+  const frameCountRef = useRef(0)
 
   const springVelRef = useRef(0);
   const samplesRef = useRef<Sample[]>([]);
@@ -206,6 +207,7 @@ export default function VerticalSpringFeed({
    */
   const runSpring = useCallback(
     (targetY: number, initialVel: number, commitIndex: number | null) => {
+      frameCountRef.current = 0;
       stopSpring();
       animatingRef.current = true;
       springVelRef.current = initialVel * Tune.RELEASE_VELOCITY_SPRING_BLEND;
@@ -282,8 +284,13 @@ export default function VerticalSpringFeed({
         const settled =
           Math.abs(targetY - y) < Tune.SPRING_SNAP_EPSILON_PX &&
           Math.abs(v) < Tune.SPRING_SNAP_EPSILON_VEL_PX_PER_S;
+        
+        frameCountRef.current += 1;
 
         if (settled) {
+
+          console.log(`Spring settled in ${frameCountRef.current} frames`);
+    frameCountRef.current = 0;
           translateRef.current = targetY;
           springVelRef.current = 0;
           applyTransform(targetY);

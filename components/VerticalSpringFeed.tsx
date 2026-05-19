@@ -36,7 +36,7 @@ function applyRubberband(
   rawY: number,
   slideHeight: number,
   maxIndex: number,
-  factor: number
+  factor: number,
 ) {
   const minY = snapY(maxIndex, slideHeight);
   const maxY = snapY(0, slideHeight);
@@ -56,7 +56,7 @@ type Sample = { t: number; y: number };
 function pushSample(
   samplesRef: React.MutableRefObject<Sample[]>,
   t: number,
-  y: number
+  y: number,
 ) {
   const arr = samplesRef.current;
   arr.push({ t, y });
@@ -77,7 +77,7 @@ function pushSample(
  * dominating when the finger slows down at lift-off.
  */
 function estimateVelocityPxPerSec(
-  samplesRef: React.MutableRefObject<Sample[]>
+  samplesRef: React.MutableRefObject<Sample[]>,
 ): number {
   const arr = samplesRef.current;
   if (arr.length < 2) return 0;
@@ -212,21 +212,68 @@ export default function VerticalSpringFeed({
 
       let last = performance.now();
 
+      // const tick = (now: number) => {
+      //   const dt = clamp((now - last) / 1000, 0, 0.064);
+      //   // const dt = clamp((now - last) / 1000, 0, 0.016);
+      //   last = now;
+
+      //   let y = translateRef.current;
+      //   let v = springVelRef.current;
+
+      //   const displacement = targetY - y;
+      //   const accel =
+      //     (Tune.SPRING_STIFFNESS * displacement - Tune.SPRING_DAMPING * v) /
+      //     Tune.SPRING_MASS;
+
+      //   // Symplectic Euler: update velocity first, then position with new velocity.
+      //   v += accel * dt;
+      //   y += v * dt;
+
+      //   translateRef.current = y;
+      //   springVelRef.current = v;
+      //   applyTransform(y);
+
+      //   const settled =
+      //     Math.abs(targetY - y) < Tune.SPRING_SNAP_EPSILON_PX &&
+      //     Math.abs(v) < Tune.SPRING_SNAP_EPSILON_VEL_PX_PER_S;
+
+      //   if (settled) {
+      //     translateRef.current = targetY;
+      //     springVelRef.current = 0;
+      //     applyTransform(targetY);
+      //     stopSpring();
+
+      //     if (commitIndex !== null) {
+      //       activeIndexRef.current = commitIndex;
+      //       onActiveIndexChange(commitIndex);
+      //     }
+      //     // Always fire transition end — even on snap-back — so UI state (info button, etc.) stays correct.
+      //     onSlideChangeTransitionEnd?.();
+      //     return;
+      //   }
+
+      //   rafRef.current = requestAnimationFrame(tick);
+      // };
+
       const tick = (now: number) => {
-        const dt = clamp((now - last) / 1000, 0, 0.064);
+        const frameTime = clamp((now - last) / 1000, 0, 0.016);
         last = now;
 
         let y = translateRef.current;
         let v = springVelRef.current;
 
-        const displacement = targetY - y;
-        const accel =
-          (Tune.SPRING_STIFFNESS * displacement - Tune.SPRING_DAMPING * v) /
-          Tune.SPRING_MASS;
+        // Substep: divide each frame into 8 small steps for numerical stability
+        const steps = 8;
+        const dt = frameTime / steps;
 
-        // Symplectic Euler: update velocity first, then position with new velocity.
-        v += accel * dt;
-        y += v * dt;
+        for (let i = 0; i < steps; i++) {
+          const displacement = targetY - y;
+          const accel =
+            (Tune.SPRING_STIFFNESS * displacement - Tune.SPRING_DAMPING * v) /
+            Tune.SPRING_MASS;
+          v += accel * dt;
+          y += v * dt;
+        }
 
         translateRef.current = y;
         springVelRef.current = v;
@@ -246,7 +293,6 @@ export default function VerticalSpringFeed({
             activeIndexRef.current = commitIndex;
             onActiveIndexChange(commitIndex);
           }
-          // Always fire transition end — even on snap-back — so UI state (info button, etc.) stays correct.
           onSlideChangeTransitionEnd?.();
           return;
         }
@@ -256,7 +302,12 @@ export default function VerticalSpringFeed({
 
       rafRef.current = requestAnimationFrame(tick);
     },
-    [applyTransform, onActiveIndexChange, onSlideChangeTransitionEnd, stopSpring]
+    [
+      applyTransform,
+      onActiveIndexChange,
+      onSlideChangeTransitionEnd,
+      stopSpring,
+    ],
   );
 
   const resolveTargetIndex = useCallback(
@@ -283,7 +334,7 @@ export default function VerticalSpringFeed({
 
       return next;
     },
-    [slideCount]
+    [slideCount],
   );
 
   const onPointerDown = useCallback(
@@ -319,7 +370,7 @@ export default function VerticalSpringFeed({
         /* ignore */
       }
     },
-    [measure, onActiveIndexChange, slideCount, stopSpring]
+    [measure, onActiveIndexChange, slideCount, stopSpring],
   );
 
   const onPointerMove = useCallback(
@@ -340,7 +391,7 @@ export default function VerticalSpringFeed({
       translateRef.current = y;
       applyTransform(y);
     },
-    [applyTransform, slideCount]
+    [applyTransform, slideCount],
   );
 
   const endGesture = useCallback(
@@ -392,7 +443,7 @@ export default function VerticalSpringFeed({
       resolveTargetIndex,
       runSpring,
       slideCount,
-    ]
+    ],
   );
 
   const onPointerUp = useCallback(
@@ -406,7 +457,7 @@ export default function VerticalSpringFeed({
       }
       endGesture(e.pointerId);
     },
-    [endGesture]
+    [endGesture],
   );
 
   const onPointerCancel = useCallback(
@@ -420,7 +471,7 @@ export default function VerticalSpringFeed({
       }
       endGesture(e.pointerId);
     },
-    [endGesture]
+    [endGesture],
   );
 
   // Keyboard navigation.
@@ -461,8 +512,43 @@ export default function VerticalSpringFeed({
     const el = rootRef.current;
     if (!el) return;
 
+    // const onWheel = (e: WheelEvent) => {
+    //   if (draggingRef.current) return; // Don't fight a touch gesture.
+    //   const dy = e.deltaY;
+    //   if (Math.abs(dy) < 18) return;
+    //   e.preventDefault();
+
+    //   const maxIndex = Math.max(0, slideCount - 1);
+    //   const delta = dy > 0 ? 1 : -1;
+
+    //   // Resolve current position to nearest slide (handles mid-animation interrupts).
+    //   const h = slideHeightRef.current;
+    //   const currentNearest = clamp(
+    //     Math.round(-translateRef.current / h),
+    //     0,
+    //     maxIndex
+    //   );
+    //   const next = clamp(currentNearest + delta, 0, maxIndex);
+    //   if (next === currentNearest && animatingRef.current === false) return;
+
+    //   if (h <= 0) return;
+
+    //   // If we're changing slide (not same-slide re-snap), fire start callback.
+    //   if (next !== activeIndexRef.current) {
+    //     onSlideChangeTransitionStart?.();
+    //   }
+
+    //   // Update active index immediately for mid-animation interrupts.
+    //   if (next !== activeIndexRef.current) {
+    //     activeIndexRef.current = next;
+    //     onActiveIndexChange(next);
+    //   }
+
+    //   runSpring(snapY(next, h), 0, null);
+    // };
+
     const onWheel = (e: WheelEvent) => {
-      if (draggingRef.current) return; // Don't fight a touch gesture.
+      if (draggingRef.current) return;
       const dy = e.deltaY;
       if (Math.abs(dy) < 18) return;
       e.preventDefault();
@@ -470,30 +556,27 @@ export default function VerticalSpringFeed({
       const maxIndex = Math.max(0, slideCount - 1);
       const delta = dy > 0 ? 1 : -1;
 
-      // Resolve current position to nearest slide (handles mid-animation interrupts).
       const h = slideHeightRef.current;
       const currentNearest = clamp(
         Math.round(-translateRef.current / h),
         0,
-        maxIndex
+        maxIndex,
       );
       const next = clamp(currentNearest + delta, 0, maxIndex);
       if (next === currentNearest && animatingRef.current === false) return;
-
       if (h <= 0) return;
 
-      // If we're changing slide (not same-slide re-snap), fire start callback.
       if (next !== activeIndexRef.current) {
         onSlideChangeTransitionStart?.();
       }
 
-      // Update active index immediately for mid-animation interrupts.
-      if (next !== activeIndexRef.current) {
-        activeIndexRef.current = next;
-        onActiveIndexChange(next);
-      }
-
-      runSpring(snapY(next, h), 0, null);
+      // ✅ Remove the manual onActiveIndexChange call
+      // ✅ Pass next as commitIndex so runSpring handles the state update + transitionEnd
+      runSpring(
+        snapY(next, h),
+        0,
+        next !== activeIndexRef.current ? next : null,
+      );
     };
 
     el.addEventListener("wheel", onWheel, { passive: false });

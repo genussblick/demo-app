@@ -1,18 +1,5 @@
 "use client";
 
-/**
- * Custom vertical "reel" scroller: pointer tracking + velocity-first snap + damped spring.
- *
- * Changes from previous version:
- *  - Semi-implicit (symplectic) Euler integration: smoother spring, no drift accumulation
- *  - Velocity estimation fixed: end-window weighted MORE than last-pair (less noise, true flick feel)
- *  - Multi-touch guard: second finger doesn't hijack the gesture
- *  - onSlideChangeTransitionEnd fires even when snapping back to same slide
- *  - Wheel: no longer blocked during animation (interrupts and re-snaps like TikTok desktop)
- *  - endGesture: velocity resolved against pre-clamp position for accurate drag-distance detection
- *  - Pointer capture released before endGesture to avoid Safari edge cases
- */
-
 import {
   useRef,
   useEffect,
@@ -64,18 +51,6 @@ function pushSample(
   while (arr.length > 1 && arr[0].t < cutoff) arr.shift();
 }
 
-/**
- * End-of-gesture velocity estimation.
- *
- * Previous version weighted the last pair at 0.72 and the end-window at 0.28.
- * That's backwards: a single last-pair sample is extremely noisy (depends on
- * frame timing), while the end-window average is more stable. TikTok's feel
- * comes from reading the *release* speed of the finger, not the last frame jitter.
- *
- * Fix: end-window weighted at 0.75, last-pair at 0.25.
- * The last-pair component still captures the very tip of the flick without
- * dominating when the finger slows down at lift-off.
- */
 function estimateVelocityPxPerSec(
   samplesRef: React.MutableRefObject<Sample[]>,
 ): number {
@@ -133,7 +108,7 @@ export default function VerticalSpringFeed({
   const pointerStartYRef = useRef(0);
   const animatingRef = useRef(false);
   const rafRef = useRef<number | null>(null);
-  const frameCountRef = useRef(0)
+  const frameCountRef = useRef(0);
 
   const springVelRef = useRef(0);
   const samplesRef = useRef<Sample[]>([]);
@@ -187,24 +162,6 @@ export default function VerticalSpringFeed({
     animatingRef.current = false;
   }, []);
 
-  /**
-   * Spring loop using semi-implicit (symplectic) Euler integration.
-   *
-   * Previous version used explicit Euler:
-   *   v += a * dt
-   *   y += v_old * dt   ← uses OLD velocity
-   *
-   * Symplectic Euler uses the NEW velocity for the position update:
-   *   v += a * dt
-   *   y += v_new * dt   ← uses NEW velocity
-   *
-   * This conserves energy better, meaning the spring doesn't slowly drift away
-   * from the target or accumulate numerical error over many frames. The snap
-   * feels consistently clean regardless of frame rate dips.
-   *
-   * commitIndex: when non-null, parent state updates only after settle.
-   * When null (snap-back to same slide), we still fire onSlideChangeTransitionEnd.
-   */
   const runSpring = useCallback(
     (targetY: number, initialVel: number, commitIndex: number | null) => {
       frameCountRef.current = 0;
@@ -213,49 +170,6 @@ export default function VerticalSpringFeed({
       springVelRef.current = initialVel * Tune.RELEASE_VELOCITY_SPRING_BLEND;
 
       let last = performance.now();
-
-      // const tick = (now: number) => {
-      //   const dt = clamp((now - last) / 1000, 0, 0.064);
-      //   // const dt = clamp((now - last) / 1000, 0, 0.016);
-      //   last = now;
-
-      //   let y = translateRef.current;
-      //   let v = springVelRef.current;
-
-      //   const displacement = targetY - y;
-      //   const accel =
-      //     (Tune.SPRING_STIFFNESS * displacement - Tune.SPRING_DAMPING * v) /
-      //     Tune.SPRING_MASS;
-
-      //   // Symplectic Euler: update velocity first, then position with new velocity.
-      //   v += accel * dt;
-      //   y += v * dt;
-
-      //   translateRef.current = y;
-      //   springVelRef.current = v;
-      //   applyTransform(y);
-
-      //   const settled =
-      //     Math.abs(targetY - y) < Tune.SPRING_SNAP_EPSILON_PX &&
-      //     Math.abs(v) < Tune.SPRING_SNAP_EPSILON_VEL_PX_PER_S;
-
-      //   if (settled) {
-      //     translateRef.current = targetY;
-      //     springVelRef.current = 0;
-      //     applyTransform(targetY);
-      //     stopSpring();
-
-      //     if (commitIndex !== null) {
-      //       activeIndexRef.current = commitIndex;
-      //       onActiveIndexChange(commitIndex);
-      //     }
-      //     // Always fire transition end — even on snap-back — so UI state (info button, etc.) stays correct.
-      //     onSlideChangeTransitionEnd?.();
-      //     return;
-      //   }
-
-      //   rafRef.current = requestAnimationFrame(tick);
-      // };
 
       const tick = (now: number) => {
         const frameTime = clamp((now - last) / 1000, 0, 0.016);
@@ -284,13 +198,12 @@ export default function VerticalSpringFeed({
         const settled =
           Math.abs(targetY - y) < Tune.SPRING_SNAP_EPSILON_PX &&
           Math.abs(v) < Tune.SPRING_SNAP_EPSILON_VEL_PX_PER_S;
-        
+
         frameCountRef.current += 1;
 
         if (settled) {
-
           console.log(`Spring settled in ${frameCountRef.current} frames`);
-    frameCountRef.current = 0;
+          frameCountRef.current = 0;
           translateRef.current = targetY;
           springVelRef.current = 0;
           applyTransform(targetY);
@@ -417,12 +330,6 @@ export default function VerticalSpringFeed({
 
       const gestureIndex = gestureStartIndexRef.current;
 
-      /**
-       * Resolve velocity and target BEFORE clamping the rubber-band position.
-       * This preserves the drag distance information for resolveTargetIndex —
-       * if the user dragged 15% past the edge, they clearly intended to change slides.
-       * After resolving, we clamp so the spring starts from a valid position.
-       */
       const rawY = translateRef.current;
       const v = estimateVelocityPxPerSec(samplesRef);
       samplesRef.current = [];
@@ -472,9 +379,7 @@ export default function VerticalSpringFeed({
       if (e.pointerId === activePointerIdRef.current) {
         try {
           e.currentTarget.releasePointerCapture(e.pointerId);
-        } catch {
-          /* ignore */
-        }
+        } catch {}
       }
       endGesture(e.pointerId);
     },
@@ -510,49 +415,9 @@ export default function VerticalSpringFeed({
     return () => el.removeEventListener("keydown", onKey);
   }, [measure, onSlideChangeTransitionStart, runSpring, slideCount]);
 
-  /**
-   * Mouse wheel: interrupts in-flight animation and re-resolves, like TikTok desktop.
-   * Previous version blocked wheel during animation (animatingRef check), causing
-   * rapid wheel scrolling to feel sluggish / "locked". Now it interrupts cleanly.
-   */
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-
-    // const onWheel = (e: WheelEvent) => {
-    //   if (draggingRef.current) return; // Don't fight a touch gesture.
-    //   const dy = e.deltaY;
-    //   if (Math.abs(dy) < 18) return;
-    //   e.preventDefault();
-
-    //   const maxIndex = Math.max(0, slideCount - 1);
-    //   const delta = dy > 0 ? 1 : -1;
-
-    //   // Resolve current position to nearest slide (handles mid-animation interrupts).
-    //   const h = slideHeightRef.current;
-    //   const currentNearest = clamp(
-    //     Math.round(-translateRef.current / h),
-    //     0,
-    //     maxIndex
-    //   );
-    //   const next = clamp(currentNearest + delta, 0, maxIndex);
-    //   if (next === currentNearest && animatingRef.current === false) return;
-
-    //   if (h <= 0) return;
-
-    //   // If we're changing slide (not same-slide re-snap), fire start callback.
-    //   if (next !== activeIndexRef.current) {
-    //     onSlideChangeTransitionStart?.();
-    //   }
-
-    //   // Update active index immediately for mid-animation interrupts.
-    //   if (next !== activeIndexRef.current) {
-    //     activeIndexRef.current = next;
-    //     onActiveIndexChange(next);
-    //   }
-
-    //   runSpring(snapY(next, h), 0, null);
-    // };
 
     const onWheel = (e: WheelEvent) => {
       if (draggingRef.current) return;

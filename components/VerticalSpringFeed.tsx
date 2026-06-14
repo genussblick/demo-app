@@ -77,9 +77,7 @@ export type VerticalSpringFeedProps = {
   children: ReactNode;
   activeIndex: number;
   onActiveIndexChange: (index: number) => void;
-  /** Fired when we start moving toward a different slide than current active. */
   onSlideChangeTransitionStart?: () => void;
-  /** Fired once motion has settled on a snap target (including snap-back to same slide). */
   onSlideChangeTransitionEnd?: () => void;
   className?: string;
 };
@@ -101,7 +99,6 @@ export default function VerticalSpringFeed({
   const translateRef = useRef(0);
   const activeIndexRef = useRef(activeIndex);
   const draggingRef = useRef(false);
-  /** Track the pointer ID that started the gesture; ignore all other pointers (multi-touch guard). */
   const activePointerIdRef = useRef<number | null>(null);
   const gestureStartIndexRef = useRef(0);
   const gestureStartTranslateRef = useRef(0);
@@ -130,7 +127,7 @@ export default function VerticalSpringFeed({
     activeIndexRef.current = activeIndex;
   }, [activeIndex]);
 
-  // External index change: jump without animation if idle.
+  // jump without animation if idle.
   useEffect(() => {
     if (draggingRef.current || animatingRef.current) return;
     const h = measure();
@@ -178,7 +175,7 @@ export default function VerticalSpringFeed({
         let y = translateRef.current;
         let v = springVelRef.current;
 
-        // Substep: divide each frame into 8 small steps for numerical stability
+        // divide each frame into 8 small steps for numerical stability
         const steps = 8;
         const dt = frameTime / steps;
 
@@ -238,13 +235,13 @@ export default function VerticalSpringFeed({
 
       let next = gestureIndex;
 
-      // 1) Velocity wins: fast flick changes slide regardless of drag distance.
+      //fast flick slide regardless of drag distance.
       if (velocityPxPerSec < -Tune.FLICK_VELOCITY_THRESHOLD_PX_PER_S) {
         next = Math.min(maxIndex, gestureIndex + 1);
       } else if (velocityPxPerSec > Tune.FLICK_VELOCITY_THRESHOLD_PX_PER_S) {
         next = Math.max(0, gestureIndex - 1);
       } else {
-        // 2) Slow drag: compare against snap position of the gesture-start slide.
+        //slow flick slide
         const base = snapY(gestureIndex, h);
         const drag = releaseY - base;
         const need = h * Tune.DISTANCE_THRESHOLD_RATIO;
@@ -260,7 +257,7 @@ export default function VerticalSpringFeed({
   const onPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       if (e.button !== 0 && e.pointerType === "mouse") return;
-      // Multi-touch guard: only track the first finger down.
+      // only track the first finger down.
       if (activePointerIdRef.current !== null) return;
 
       stopSpring();
@@ -272,7 +269,7 @@ export default function VerticalSpringFeed({
       draggingRef.current = true;
 
       const maxIndex = Math.max(0, slideCount - 1);
-      // Snap to nearest slide from current visual offset (handles interrupted springs correctly).
+      //snap to nearest slide in case we were mid-spring or mid-rubberband when the user put their finger down.
       const nearest = clamp(Math.round(-translateRef.current / h), 0, maxIndex);
       if (nearest !== activeIndexRef.current) {
         activeIndexRef.current = nearest;
@@ -295,7 +292,7 @@ export default function VerticalSpringFeed({
 
   const onPointerMove = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      // Ignore any pointer that isn't the one that started the gesture.
+      // ignore non-active pointers
       if (!draggingRef.current || e.pointerId !== activePointerIdRef.current)
         return;
 
@@ -317,7 +314,7 @@ export default function VerticalSpringFeed({
   const endGesture = useCallback(
     (pointerId?: number) => {
       if (!draggingRef.current) return;
-      // If a specific pointer ended, make sure it's the active one.
+      // Ignore non active pointers
       if (pointerId !== undefined && pointerId !== activePointerIdRef.current)
         return;
 
@@ -338,7 +335,7 @@ export default function VerticalSpringFeed({
       const targetY = snapY(targetIndex, h);
       const willChangeSlide = targetIndex !== gestureIndex;
 
-      // Now clamp rubber-band for the spring's starting point.
+      // rubber band the release position
       const minY = snapY(maxIndex, h);
       const maxY = snapY(0, h);
       translateRef.current = clamp(rawY, minY, maxY);
@@ -348,7 +345,6 @@ export default function VerticalSpringFeed({
         onSlideChangeTransitionStart?.();
       }
 
-      // Pass commitIndex only when changing slides; snap-back still fires transitionEnd via runSpring.
       runSpring(targetY, v, willChangeSlide ? targetIndex : null);
     },
     [
@@ -386,7 +382,7 @@ export default function VerticalSpringFeed({
     [endGesture],
   );
 
-  // Keyboard navigation.
+  //keyboard navigation
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -442,8 +438,6 @@ export default function VerticalSpringFeed({
         onSlideChangeTransitionStart?.();
       }
 
-      // ✅ Remove the manual onActiveIndexChange call
-      // ✅ Pass next as commitIndex so runSpring handles the state update + transitionEnd
       runSpring(
         snapY(next, h),
         0,

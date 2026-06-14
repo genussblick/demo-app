@@ -126,5 +126,3 @@
     @apply scroll-smooth;
   }
 }
-
-/* Full-screen vertical reel: slides are `h-dvh shrink-0` in app/page.tsx; track is transformed in VerticalSpringFeed. */

@@ -1,9 +1,9 @@
 // controls how fast the spring snaps to position.
-export const SPRING_STIFFNESS = 18000;
+export const SPRING_STIFFNESS = 35000;
 
 //controls whether the snap overshoots (bounces) or settles cleanly.
 // damping = 2 * sqrt(STIFFNESS * MASS)
-export const SPRING_DAMPING = 280;
+export const SPRING_DAMPING = 350;
 
 export const SPRING_MASS = 1;
 

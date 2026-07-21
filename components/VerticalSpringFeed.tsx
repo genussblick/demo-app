@@ -159,74 +159,111 @@ export default function VerticalSpringFeed({
     animatingRef.current = false;
   }, []);
 
-  const runSpring = useCallback(
-    (targetY: number, initialVel: number, commitIndex: number | null) => {
-      frameCountRef.current = 0;
-      stopSpring();
-      animatingRef.current = true;
-      springVelRef.current = initialVel * Tune.RELEASE_VELOCITY_SPRING_BLEND;
+  // const runSpring = useCallback(
+  //   (targetY: number, initialVel: number, commitIndex: number | null) => {
+  //     frameCountRef.current = 0;
+  //     stopSpring();
+  //     animatingRef.current = true;
+  //     springVelRef.current = initialVel * Tune.RELEASE_VELOCITY_SPRING_BLEND;
 
-      let last = performance.now();
+  //     let last = performance.now();
 
-      const tick = (now: number) => {
-        const frameTime = clamp((now - last) / 1000, 0, 0.016);
-        last = now;
+  //     const tick = (now: number) => {
+  //       const frameTime = clamp((now - last) / 1000, 0, 0.016);
+  //       last = now;
 
-        let y = translateRef.current;
-        let v = springVelRef.current;
+  //       let y = translateRef.current;
+  //       let v = springVelRef.current;
 
-        // divide each frame into 8 small steps for numerical stability
-        const steps = 8;
-        const dt = frameTime / steps;
+  //       // divide each frame into 8 small steps for numerical stability
+  //       const steps = 8;
+  //       const dt = frameTime / steps;
 
-        for (let i = 0; i < steps; i++) {
-          const displacement = targetY - y;
-          const accel =
-            (Tune.SPRING_STIFFNESS * displacement - Tune.SPRING_DAMPING * v) /
-            Tune.SPRING_MASS;
-          v += accel * dt;
-          y += v * dt;
+  //       for (let i = 0; i < steps; i++) {
+  //         const displacement = targetY - y;
+  //         const accel =
+  //           (Tune.SPRING_STIFFNESS * displacement - Tune.SPRING_DAMPING * v) /
+  //           Tune.SPRING_MASS;
+  //         v += accel * dt;
+  //         y += v * dt;
+  //       }
+
+  //       translateRef.current = y;
+  //       springVelRef.current = v;
+  //       applyTransform(y);
+
+  //       const settled =
+  //         Math.abs(targetY - y) < Tune.SPRING_SNAP_EPSILON_PX &&
+  //         Math.abs(v) < Tune.SPRING_SNAP_EPSILON_VEL_PX_PER_S;
+
+  //       frameCountRef.current += 1;
+
+  //       if (settled) {
+  //         console.log(`Spring settled in ${frameCountRef.current} frames`);
+  //         frameCountRef.current = 0;
+  //         translateRef.current = targetY;
+  //         springVelRef.current = 0;
+  //         applyTransform(targetY);
+  //         stopSpring();
+
+  //         if (commitIndex !== null) {
+  //           activeIndexRef.current = commitIndex;
+  //           onActiveIndexChange(commitIndex);
+  //         }
+  //         onSlideChangeTransitionEnd?.();
+  //         return;
+  //       }
+
+  //       rafRef.current = requestAnimationFrame(tick);
+  //     };
+
+  //     rafRef.current = requestAnimationFrame(tick);
+  //   },
+  //   [
+  //     applyTransform,
+  //     onActiveIndexChange,
+  //     onSlideChangeTransitionEnd,
+  //     stopSpring,
+  //   ],
+  // );
+const runSpring = useCallback(
+  (targetY: number, initialVel: number, commitIndex: number | null) => {
+    stopSpring();
+    animatingRef.current = true;
+
+    const startY = translateRef.current;
+    const startTime = performance.now();
+    const DURATION_MS = 167; // approximately 10 frames per scroll
+
+    const tick = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / DURATION_MS, 1);
+
+      // constant speed
+      const y = startY + (targetY - startY) * progress;
+      translateRef.current = y;
+      applyTransform(y);
+
+      if (progress >= 1) {
+        translateRef.current = targetY;
+        applyTransform(targetY);
+        animatingRef.current = false;
+
+        if (commitIndex !== null) {
+          activeIndexRef.current = commitIndex;
+          onActiveIndexChange(commitIndex);
         }
-
-        translateRef.current = y;
-        springVelRef.current = v;
-        applyTransform(y);
-
-        const settled =
-          Math.abs(targetY - y) < Tune.SPRING_SNAP_EPSILON_PX &&
-          Math.abs(v) < Tune.SPRING_SNAP_EPSILON_VEL_PX_PER_S;
-
-        frameCountRef.current += 1;
-
-        if (settled) {
-          console.log(`Spring settled in ${frameCountRef.current} frames`);
-          frameCountRef.current = 0;
-          translateRef.current = targetY;
-          springVelRef.current = 0;
-          applyTransform(targetY);
-          stopSpring();
-
-          if (commitIndex !== null) {
-            activeIndexRef.current = commitIndex;
-            onActiveIndexChange(commitIndex);
-          }
-          onSlideChangeTransitionEnd?.();
-          return;
-        }
-
-        rafRef.current = requestAnimationFrame(tick);
-      };
+        onSlideChangeTransitionEnd?.();
+        return;
+      }
 
       rafRef.current = requestAnimationFrame(tick);
-    },
-    [
-      applyTransform,
-      onActiveIndexChange,
-      onSlideChangeTransitionEnd,
-      stopSpring,
-    ],
-  );
+    };
 
+    rafRef.current = requestAnimationFrame(tick);
+  },
+  [applyTransform, onActiveIndexChange, onSlideChangeTransitionEnd, stopSpring],
+);
   const resolveTargetIndex = useCallback(
     (releaseY: number, gestureIndex: number, velocityPxPerSec: number) => {
       const h = slideHeightRef.current;
